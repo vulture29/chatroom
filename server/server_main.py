@@ -1,5 +1,5 @@
 import select
-from socket_operation import *
+from server_socket_operation import *
 
 
 def start_chat_server():
@@ -24,5 +24,4 @@ def start_chat_server():
 
 
 if __name__ == "__main__":
-    login()
     start_chat_server()
