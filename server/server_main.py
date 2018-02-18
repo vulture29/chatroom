@@ -24,4 +24,5 @@ def start_chat_server():
 
 
 if __name__ == "__main__":
+    login()
     start_chat_server()
