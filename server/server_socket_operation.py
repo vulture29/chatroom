@@ -1,4 +1,6 @@
 import socket
+import json
+import struct
 
 HOST = ''
 SOCKET_LIST = []
@@ -13,6 +15,11 @@ def broadcast(server_socket, from_sock, message):
         # send the message only to peer
         if sock != server_socket and sock != from_sock:
             try:
+                header = {'timestamp': 1, 'msg_length': len(message), 'type': 'normal_msg'}
+                head_str = bytes(json.dumps(header))
+                head_len_str = struct.pack('i', len(head_str))
+                sock.send(head_len_str)
+                sock.send(head_str)
                 sock.send(message)
             except:
                 # broken socket connection
@@ -40,7 +47,13 @@ def handle_new_connection(server_socket):
 
 def handle_client_msg(server_socket, sock):
     try:
-        data = sock.recv(RECV_BUFFER)
+        head_len_str = sock.recv(4)
+        header_len = struct.unpack('i', head_len_str)[0]
+        head_str = sock.recv(header_len)
+        header = json.loads(head_str)
+        real_data_len = header['msg_length']
+        data = sock.recv(real_data_len)
+        # data = sock.recv(RECV_BUFFER)
         if data:
             broadcast(server_socket, sock, "\r" + '[' + str(sock.getpeername()) + '] ' + data)
         else:
@@ -50,6 +63,7 @@ def handle_client_msg(server_socket, sock):
             print("Client " + str(sock.getpeername()) + " disconnected")
             broadcast(server_socket, sock, "Client " + str(sock.getpeername()) + " disconnected\n")
     except:
-        pass
+        if sock in SOCKET_LIST:
+            SOCKET_LIST.remove(sock)
         print("Client " + str(sock.getpeername()) + " disconnected")
         broadcast(server_socket, sock, "Client " + str(sock.getpeername()) + " disconnected\n")
