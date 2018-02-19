@@ -30,38 +30,38 @@ class Client:
             sys.exit()
         print("Connected!")
 
-    def check_user(self, username, passwd):
-        return True
+    @staticmethod
+    def write_stdout(message):
+        sys.stdout.write(message)
+        sys.stdout.flush()
 
     def register(self, para):
-        # get username and passwd
-        username = "user1"
-        passwd = "passwd1"
+        # get username and password
+        # self.write_stdout("Username: ")
+        username = raw_input("Username: ")
+        passwd = raw_input("Password: ")
         register_info = {'type': 'register', 'username': username, 'passwd': passwd}
         self.send_socket(json.dumps(register_info))
-
+        # self.print_prompt()
         return True
 
     def login(self, para):
-        # get username and passwd
-        username = "user1"
-        passwd = "passwd1"
-        if self.check_user(username, passwd):
-            self.logged_in = True
-            self.user = username
-        else:
-            print("Incorrect username or password.")
+        # get username and password
+        username = raw_input("Username: ")
+        passwd = raw_input("Password: ")
+        login_info = {'type': 'login', 'username': username, 'passwd': passwd}
+        self.send_socket(json.dumps(login_info))
+
         return True
 
     def chatall(self, para):
-        data = {'type': 'chat', 'message': para}
+        if not self.logged_in:
+            Client.write_stdout("You need to log in before chatting\n")
+            return True
+        data = {'type': 'chat', 'message': para, 'user': self.user}
         self.send_socket(json.dumps(data))
         self.print_prompt()
         return True
-
-    def quit(self, para):
-        print("Exiting...")
-        return False
 
     def print_prompt(self):
         sys.stdout.write('[' + self.user + '] ')
@@ -105,17 +105,14 @@ class Client:
                     # from stdin
                     input_str = sys.stdin.readline()
                     space_index = input_str.find(' ')
-                    if space_index == -1:
-                        self.invalid_prompt()
-                        continue
-                    command = input_str[0:space_index]
+                    command = input_str.strip() if space_index == -1 else input_str[0:space_index]
                     try:
                         command_func = getattr(self, command)
                     except AttributeError:
                         self.invalid_prompt()
                         continue
                     command_func(input_str[space_index + 1:])
-        except socket.error, select.error:
+        except:
             print()
             print("Disconnected from server")
             sys.exit()
@@ -128,13 +125,26 @@ class Client:
             data_list = self.listen_socket()
             for data in data_list:
                 try:
+                    self.print_prompt()
                     msg_dict = json.loads(data)
-                    data_dict = json.loads(msg_dict['data'])
+                    data_dict = msg_dict['data']
                     if data_dict['type'] == 'chat':
-                        sys.stdout.write('\n[' + msg_dict['source'] + '] ' + data_dict['message'])
-                        sys.stdout.flush()
+                        Client.write_stdout('\n[' + msg_dict['source'] + '] ' + data_dict['message'])
                     elif data_dict['type'] == 'register':
-                        print("Register successfully!")
+                        if data_dict['status'] == 'success':
+                            Client.write_stdout('Successfully registered!\n')
+                        elif data_dict['status'] == 'exist':
+                            Client.write_stdout('Your username has already been registered.\n' +
+                                                'Try agin with another username.\n')
+                        else:
+                            Client.write_stdout('Fail to register.\n')
+                    elif data_dict['type'] == 'login':
+                        if data_dict['status'] == 'success':
+                            self.user = data_dict['username']
+                            self.logged_in = True
+                            Client.write_stdout('You have logged in as ' + self.user + '\n')
+                        elif data_dict['status'] == 'fail':
+                            Client.write_stdout('Your username or password is invalid. Try again.\n')
                     self.print_prompt()
                 except ValueError:
                     # non-structured msg
