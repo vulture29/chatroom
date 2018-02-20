@@ -13,7 +13,7 @@ class Client:
         self.host = HOST
         self.port = PORT
         self.logged_in = False
-        self.user = "empty"
+        self.user = "Guest"
         self.sock = None
         self.init_client_socket(self.host, self.port)
 
@@ -59,6 +59,12 @@ class Client:
             Client.write_stdout("You need to log in before chatting\n")
             return True
         data = {'type': 'chat', 'message': para, 'user': self.user}
+        self.send_socket(json.dumps(data))
+        self.print_prompt()
+        return True
+
+    def query(self, para):
+        data = {'type': 'query', 'message': para, 'user': self.user}
         self.send_socket(json.dumps(data))
         self.print_prompt()
         return True
@@ -143,11 +149,17 @@ class Client:
                             self.user = data_dict['username']
                             self.logged_in = True
                             Client.write_stdout('You have logged in as ' + self.user + '\n')
+                        elif data_dict['status'] == 'already':
+                            Client.write_stdout('The username has already logged in.\n')
                         elif data_dict['status'] == 'fail':
                             Client.write_stdout('Your username or password is invalid. Try again.\n')
+                    elif data_dict['type'] == 'query':
+                        online_time = data_dict['online_time']
+                        Client.write_stdout('Your total online time is ' + str(online_time) + 's\n')
                     self.print_prompt()
                 except ValueError:
                     # non-structured msg
+                    print("non-structured msg")
                     print(data)
                     self.print_prompt()
 
