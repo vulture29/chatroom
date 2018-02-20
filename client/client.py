@@ -6,6 +6,7 @@ import struct
 
 HOST = "127.0.0.1"
 PORT = 9009
+MAX_MSG_SIZE = 1024
 
 
 class Client:
@@ -58,6 +59,8 @@ class Client:
         if not self.logged_in:
             Client.write_stdout("You need to log in before chatting\n")
             return True
+        if len(para) > MAX_MSG_SIZE:
+            Client.write_stdout("Your message is too long. Max message size is " + MAX_MSG_SIZE)
         data = {'type': 'chat', 'message': para, 'user': self.user}
         self.send_socket(json.dumps(data))
         self.print_prompt()

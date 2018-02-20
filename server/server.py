@@ -4,6 +4,7 @@ import json
 import struct
 import shelve
 import time
+import threading
 
 HOST = ''
 PORT = 9009
@@ -90,7 +91,6 @@ class Server:
             if sock != self.server_socket and sock != from_sock:
                 self.send_socket(sock, message)
 
-
     def handle_new_connection(self):
         sock, sock_addr = self.server_socket.accept()
         connection = Connection(sock)
@@ -167,7 +167,10 @@ class Server:
             head_str = sock.recv(header_len)
             header = json.loads(head_str)
             real_data_len = header['msg_length']
-            data = sock.recv(real_data_len)
+            recv_size = 0
+            while recv_size < real_data_len:
+                data = sock.recv(real_data_len-recv_size)
+                recv_size += len(data)
             if data:
                 print('[' + str(sock.getpeername()) + '] ' + data)
                 data_dict = json.loads(data)
@@ -197,8 +200,13 @@ class Server:
             for sock in ready_to_read:
                 # new connection request
                 if sock == self.server_socket:
+                    # t_handle_new_connection = threading.Thread(target=self.handle_new_connection, name='new_connection')
+                    # t_handle_new_connection.start()
                     self.handle_new_connection()
                 # msg from an existing connection
                 else:
+                    # t_handle_client_msg = threading.Thread(target=self.handle_client_msg,
+                    #                                        args=(sock,), name='_client_msg')
+                    # t_handle_client_msg.start()
                     self.handle_client_msg(sock)
         server_socket.close()
