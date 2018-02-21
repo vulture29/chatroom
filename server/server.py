@@ -37,6 +37,7 @@ class Server:
         for user in self.user_online_dict.keys():
             tmp_user_dict = self.user_online_dict.get(user)
             tmp_user_dict['login_lock'] = False
+            self.user_online_dict[user] = tmp_user_dict
         self.user_dict = shelve.open(USER_RECORD_FILE_PATH)
 
     def init_server_socket(self):
@@ -98,6 +99,18 @@ class Server:
         print("Client (%s, %s) connected" % sock_addr)
         # self.broadcast(sock, "%s entered chatting room\n" % connection.user)
 
+    def handle_disconnect(self, sock, data=None):
+        for connection in self.connection_list:
+            if connection.sock == sock:
+                username = connection.user
+                tmp_user_dict = self.user_online_dict[username]
+                tmp_user_dict['login_lock'] = False
+                tmp_user_dict['logout_time'].append(time.time())
+                self.user_online_dict[username] = tmp_user_dict
+                self.remove_sock(sock)
+                print("Client " + str(sock.getpeername()) + " disconnected")
+                self.broadcast(sock, "Client " + str(sock.getpeername()) + " disconnected\n")
+
     def handle_register(self, sock, user_info):
         username = str(user_info['username'])
         passwd = str(user_info['passwd'])
@@ -116,12 +129,12 @@ class Server:
         passwd = str(user_info['passwd'])
         if username not in self.user_online_dict:
             self.user_online_dict[username] = {'login_lock': False, 'login_time': [], 'logout_time': []}
-        if self.user_online_dict.get(username).get('login_lock', False):
-            status = 'already'
-        elif self.user_dict.get(username) == passwd:
-            status = 'success'
-        else:
+        if self.user_dict.get(username) != passwd:
             status = 'fail'
+        elif self.user_online_dict.get(username).get('login_lock', False):
+            status = 'already'
+        else:
+            status = 'success'
         login_info = {'type': 'login', 'status': status, 'username': username}
         message = {'source': str(sock.getpeername()), 'data': login_info}
         self.send_socket(sock, json.dumps(message))
@@ -137,19 +150,22 @@ class Server:
             self.user_online_dict[username] = tmp_user_dict
             self.broadcast(sock, "%s entered chatting room\n" % username)
 
-    def handle_disconnect(self, sock, data=None):
-        for connection in self.connection_list:
-            if connection.sock == sock:
-                username = connection.user
-                tmp_user_dict = self.user_online_dict[username]
-                tmp_user_dict['login_lock'] = False
-                tmp_user_dict['logout_time'].append(time.time())
-                self.user_online_dict[username] = tmp_user_dict
-                self.remove_sock(sock)
-                print("Client " + str(sock.getpeername()) + " disconnected")
-                self.broadcast(sock, "Client " + str(sock.getpeername()) + " disconnected\n")
+    def handle_create(self, sock, data):
+        pass
+
+    def handle_enter(self, sock, data):
+        pass
+
+    def handle_leave(self, sock, data):
+        pass
 
     def handle_chat(self, sock, data):
+        pass
+
+    def handle_chatat(self, sock, data):
+        pass
+
+    def handle_chatall(self, sock, data):
         message = {'source': data['user'], 'data': data}
         self.broadcast(sock, "\r" + json.dumps(message))
 
@@ -200,13 +216,8 @@ class Server:
             for sock in ready_to_read:
                 # new connection request
                 if sock == self.server_socket:
-                    # t_handle_new_connection = threading.Thread(target=self.handle_new_connection, name='new_connection')
-                    # t_handle_new_connection.start()
                     self.handle_new_connection()
                 # msg from an existing connection
                 else:
-                    # t_handle_client_msg = threading.Thread(target=self.handle_client_msg,
-                    #                                        args=(sock,), name='_client_msg')
-                    # t_handle_client_msg.start()
                     self.handle_client_msg(sock)
         server_socket.close()

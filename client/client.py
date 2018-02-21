@@ -38,9 +38,9 @@ class Client:
 
     def register(self, para):
         # get username and password
-        # self.write_stdout("Username: ")
         username = raw_input("Username: ")
         passwd = raw_input("Password: ")
+        # TODO: check format
         register_info = {'type': 'register', 'username': username, 'passwd': passwd}
         self.send_socket(json.dumps(register_info))
         # self.print_prompt()
@@ -52,16 +52,70 @@ class Client:
         passwd = raw_input("Password: ")
         login_info = {'type': 'login', 'username': username, 'passwd': passwd}
         self.send_socket(json.dumps(login_info))
+        return True
 
+    def create(self, para):
+        # create chatroom
+        create_info = {'type': 'create', 'room': para}
+        self.send_socket(json.dumps(create_info))
+        return True
+
+    def enter(self, para):
+        # enter chatroom
+        enter_info = {'type': 'enter', 'room': para}
+        self.send_socket(json.dumps(enter_info))
+        return True
+
+    def leave(self, para):
+        # leave chatroom
+        leave_info = {'type': 'leave'}
+        self.send_socket(json.dumps(leave_info))
+        return True
+
+    def chat(self, para):
+        # chat in current chatroom
+        if not self.logged_in:
+            Client.write_stdout("You need to log in before chatting\n")
+            return True
+        if len(para) > MAX_MSG_SIZE:
+            Client.write_stdout("Your message is too long. Max message size is " + MAX_MSG_SIZE)
+            return True
+        data = {'type': 'chat', 'message': para, 'user': self.user}
+        self.send_socket(json.dumps(data))
+        self.print_prompt()
+        return True
+
+    def chatat(self, para):
+        # private chat with a user
+        if not self.logged_in:
+            Client.write_stdout("You need to log in before chatting\n")
+            return True
+        if len(para) > MAX_MSG_SIZE:
+            Client.write_stdout("Your message is too long. Max message size is " + MAX_MSG_SIZE)
+            return True
+        space_index = para.lstrip().find(' ')
+        if space_index == -1:
+            Client.write_stdout("You need to specify target user.\n")
+            return True
+        else:
+            target = para[0:space_index]
+            send_msg = para[space_index + 1:]
+        data = {'type': 'chatat', 'message': send_msg, 'user': self.user, 'target': target}
+        self.send_socket(json.dumps(data))
+        self.print_prompt()
         return True
 
     def chatall(self, para):
         if not self.logged_in:
             Client.write_stdout("You need to log in before chatting\n")
             return True
-        if len(para) > MAX_MSG_SIZE:
+        if len(para) < 1:
+            Client.write_stdout("Do not send empty message.\n")
+            return True
+        elif len(para) > MAX_MSG_SIZE:
             Client.write_stdout("Your message is too long. Max message size is " + MAX_MSG_SIZE)
-        data = {'type': 'chat', 'message': para, 'user': self.user}
+            return True
+        data = {'type': 'chatall', 'message': para, 'user': self.user}
         self.send_socket(json.dumps(data))
         self.print_prompt()
         return True
@@ -76,7 +130,7 @@ class Client:
         sys.stdout.write('[' + self.user + '] ')
         sys.stdout.flush()
 
-    def invalid_prompt(self):
+    def invalid_command_prompt(self):
         # self.print_prompt()
         print("Invalid command. Please enter again.")
         self.print_prompt()
@@ -112,15 +166,15 @@ class Client:
                         sys.exit()
                 else:
                     # from stdin
-                    input_str = sys.stdin.readline()
+                    input_str = sys.stdin.readline().lstrip()
                     space_index = input_str.find(' ')
                     command = input_str.strip() if space_index == -1 else input_str[0:space_index]
                     try:
                         command_func = getattr(self, command)
                     except AttributeError:
-                        self.invalid_prompt()
+                        self.invalid_command_prompt()
                         continue
-                    command_func(input_str[space_index + 1:])
+                    command_func(input_str[space_index + 1:] if space_index != -1 else '')
         except:
             print()
             print("Disconnected from server")
@@ -137,7 +191,7 @@ class Client:
                     self.print_prompt()
                     msg_dict = json.loads(data)
                     data_dict = msg_dict['data']
-                    if data_dict['type'] == 'chat':
+                    if data_dict['type'] in ('chat', 'chatall'):
                         Client.write_stdout('\n[' + msg_dict['source'] + '] ' + data_dict['message'])
                     elif data_dict['type'] == 'register':
                         if data_dict['status'] == 'success':
