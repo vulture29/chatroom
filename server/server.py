@@ -4,13 +4,13 @@ import json
 import struct
 import shelve
 import time
-import threading
 
 HOST = ''
 PORT = 9009
 MAX_LISTEN_NUM = 100
 USER_RECORD_FILE_PATH = '/Users/xingyao/Documents/Vulture/study/netease/chatroom/user_record'
 USER_ONLINE_RECORD_FILE_PATH = '/Users/xingyao/Documents/Vulture/study/netease/chatroom/user_online_record'
+CHAT_ROOM_RECORD_FILE_PATH = '/Users/xingyao/Documents/Vulture/study/netease/chatroom/chatroom_record'
 
 
 class Connection:
@@ -27,17 +27,21 @@ class Server:
         self.connection_list = []
         self.user_online_dict = None
         self.user_dict = None
+        self.chatroom_dict = None
         self.server_socket = None
         self.init_db()
         self.init_server_socket()
 
     def init_db(self):
         self.user_online_dict = shelve.open(USER_ONLINE_RECORD_FILE_PATH)
+        self.chatroom_dict = shelve.open(CHAT_ROOM_RECORD_FILE_PATH)
         # set all login lock to False
         for user in self.user_online_dict.keys():
             tmp_user_dict = self.user_online_dict.get(user)
             tmp_user_dict['login_lock'] = False
             self.user_online_dict[user] = tmp_user_dict
+        # set chatroom record to empty
+        self.chatroom_dict.clear()
         self.user_dict = shelve.open(USER_RECORD_FILE_PATH)
 
     def init_server_socket(self):
@@ -45,6 +49,12 @@ class Server:
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # read it
         self.server_socket.bind((self.host, self.port))
         self.server_socket.listen(MAX_LISTEN_NUM)
+
+    def get_user_from_sock(self, sock):
+        for connection in self.connection_list:
+            if connection.sock == sock:
+                return connection.user
+        return None
 
     def send_socket(self, sock, message):
         try:
@@ -84,9 +94,39 @@ class Server:
             total_online_time -= online_time
         return total_online_time
 
-    # broadcast chat messages to all connected clients
-    def broadcast(self, from_sock, message):
+    def send_to_target(self, from_sock, target, message):
+        target_found = False
         for connection in self.connection_list:
+            if connection.user == target:
+                target_found = True
+                self.send_socket(connection.sock, message)
+        if not target_found:
+            room_info = {'type': 'chatat', 'status': "no user"}
+            message = {'source': str(self.get_user_from_sock(from_sock)), 'data': room_info}
+            self.send_socket(from_sock, json.dumps(message))
+
+    def broadcast_room(self, from_sock, room, message):
+        connection_list = []
+        if self.chatroom_dict.get(str(room)) is None:
+            room_info = {'type': 'chat', 'status': "no room"}
+            message = {'source': str(self.get_user_from_sock(from_sock)), 'data': room_info}
+            self.send_socket(from_sock, json.dumps(message))
+            return
+        if self.get_user_from_sock(from_sock) not in self.chatroom_dict.get(str(room)):
+            room_info = {'type': 'chat', 'status': "not in room"}
+            message = {'source': str(self.get_user_from_sock(from_sock)), 'data': room_info}
+            self.send_socket(from_sock, json.dumps(message))
+            return
+        for username in self.chatroom_dict.get(str(room)):
+            connection_list.append(
+                [connection for connection in self.connection_list if connection.user == username][0])
+        self.broadcast(from_sock, message, connection_list)
+
+    # broadcast chat messages to all connected clients
+    def broadcast(self, from_sock, message, connection_list=None):
+        if connection_list is None or len(connection_list) == 0:
+            connection_list = self.connection_list
+        for connection in connection_list:
             sock = connection.sock
             # send the message only to peer
             if sock != self.server_socket and sock != from_sock:
@@ -108,8 +148,8 @@ class Server:
                 tmp_user_dict['logout_time'].append(time.time())
                 self.user_online_dict[username] = tmp_user_dict
                 self.remove_sock(sock)
-                print("Client " + str(sock.getpeername()) + " disconnected")
-                self.broadcast(sock, "Client " + str(sock.getpeername()) + " disconnected\n")
+                print("Client " + str(self.get_user_from_sock(sock)) + " disconnected")
+                self.broadcast(sock, "Client " + str(self.get_user_from_sock(sock)) + " disconnected\n")
 
     def handle_register(self, sock, user_info):
         username = str(user_info['username'])
@@ -117,11 +157,11 @@ class Server:
         if username not in self.user_dict:
             self.user_dict[username] = passwd
             register_info = {'type': 'register', 'status': "success"}
-            message = {'source': str(sock.getpeername()), 'data': register_info}
+            message = {'source': str(self.get_user_from_sock(sock)), 'data': register_info}
             self.send_socket(sock, json.dumps(message))
         else:
             register_info = {'type': 'register', 'status': "exist"}
-            message = {'source': str(sock.getpeername()), 'data': register_info}
+            message = {'source': str(self.get_user_from_sock(sock)), 'data': register_info}
             self.send_socket(sock, json.dumps(message))
 
     def handle_login(self, sock, user_info):
@@ -136,7 +176,7 @@ class Server:
         else:
             status = 'success'
         login_info = {'type': 'login', 'status': status, 'username': username}
-        message = {'source': str(sock.getpeername()), 'data': login_info}
+        message = {'source': str(self.get_user_from_sock(sock)), 'data': login_info}
         self.send_socket(sock, json.dumps(message))
 
         # successfully login
@@ -151,19 +191,73 @@ class Server:
             self.broadcast(sock, "%s entered chatting room\n" % username)
 
     def handle_create(self, sock, data):
-        pass
+        room_name = str(data['room'])
+        username = str(data['user'])
+        if room_name in self.chatroom_dict:
+            status = 'already'
+        else:
+            self.chatroom_dict[room_name] = []
+            status = 'success'
+        create_info = {'type': 'create', 'status': status}
+        message = {'source': username, 'data': create_info}
+        self.send_socket(sock, json.dumps(message))
 
     def handle_enter(self, sock, data):
-        pass
+        room_name = str(data['room'])
+        username = str(data['user'])
+        if room_name not in self.chatroom_dict:
+            status = 'not exist'
+        else:
+            member_list = self.chatroom_dict.get(room_name)
+            if username in member_list:
+                status = 'already'
+            else:
+                member_list.append(username)
+                self.chatroom_dict[room_name] = member_list
+                status = 'success'
+        enter_info = {'type': 'enter', 'status': status}
+        message = {'source': username, 'data': enter_info}
+        self.send_socket(sock, json.dumps(message))
 
     def handle_leave(self, sock, data):
-        pass
+        username = str(data['user'])
+        room_name = str(data['room'])
+        found_flag = False
+        for chatroom in self.chatroom_dict.keys():
+            if username in self.chatroom_dict.get(chatroom):
+                found_flag = True
+                break
+        if not found_flag:
+            status = 'not inside'
+        else:
+            if len(room_name) > 0:
+                member_list = self.chatroom_dict.get(room_name)
+                if username in member_list:
+                    member_list.remove(username)
+                    self.chatroom_dict[room_name] = member_list
+                    status = 'success1'
+                else:
+                    status = 'not inside'
+            else:
+                for chatroom in self.chatroom_dict.keys():
+                    if username in self.chatroom_dict.get(chatroom):
+                        member_list = self.chatroom_dict.get(chatroom)
+                        member_list.remove(username)
+                        self.chatroom_dict[room_name] = member_list
+                        status = 'success2'
+        leave_info = {'type': 'leave', 'status': status}
+        message = {'source': username, 'data': leave_info}
+        self.send_socket(sock, json.dumps(message))
 
     def handle_chat(self, sock, data):
-        pass
+        room = data['room']
+        message = {'source': data['user'], 'data': data}
+        self.broadcast_room(sock, room,  "\r" + json.dumps(message))
 
     def handle_chatat(self, sock, data):
-        pass
+        message = {'source': data['user'], 'data': data}
+        target = str(data['target'])
+        self.send_to_target(sock, target, "\r" + json.dumps(message))
 
     def handle_chatall(self, sock, data):
         message = {'source': data['user'], 'data': data}
@@ -173,7 +267,7 @@ class Server:
         username = self.get_username(sock)
         online_time = self.get_online_time(username)
         query_info = {'type': 'query', 'online_time': online_time, 'username': username}
-        message = {'source': str(sock.getpeername()), 'data': query_info}
+        message = {'source': str(self.get_user_from_sock(sock)), 'data': query_info}
         self.send_socket(sock, json.dumps(message))
 
     def handle_client_msg(self, sock):
@@ -188,7 +282,7 @@ class Server:
                 data = sock.recv(real_data_len-recv_size)
                 recv_size += len(data)
             if data:
-                print('[' + str(sock.getpeername()) + '] ' + data)
+                print('[' + str(self.get_user_from_sock(sock)) + '] ' + data)
                 data_dict = json.loads(data)
                 msg_type = data_dict['type']
                 try:

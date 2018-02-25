@@ -56,19 +56,28 @@ class Client:
 
     def create(self, para):
         # create chatroom
-        create_info = {'type': 'create', 'room': para}
+        if not self.logged_in:
+            Client.write_stdout("You need to log in before chatting\n")
+            return True
+        create_info = {'type': 'create', 'user': self.user, 'room': para.strip()}
         self.send_socket(json.dumps(create_info))
         return True
 
     def enter(self, para):
         # enter chatroom
-        enter_info = {'type': 'enter', 'room': para}
+        if not self.logged_in:
+            Client.write_stdout("You need to log in before chatting\n")
+            return True
+        enter_info = {'type': 'enter', 'user': self.user, 'room': para.strip()}
         self.send_socket(json.dumps(enter_info))
         return True
 
     def leave(self, para):
         # leave chatroom
-        leave_info = {'type': 'leave'}
+        if not self.logged_in:
+            Client.write_stdout("You need to log in before chatting\n")
+            return True
+        leave_info = {'type': 'leave', 'user': self.user, 'room': para}
         self.send_socket(json.dumps(leave_info))
         return True
 
@@ -77,10 +86,16 @@ class Client:
         if not self.logged_in:
             Client.write_stdout("You need to log in before chatting\n")
             return True
-        if len(para) > MAX_MSG_SIZE:
+        space_index = para.lstrip().find(' ')
+        if space_index == -1:
+            Client.write_stdout("Usage: chat (room name) (message)\n")
+            return True
+        room = para[0:space_index]
+        send_msg = para[space_index + 1:]
+        if len(send_msg) > MAX_MSG_SIZE:
             Client.write_stdout("Your message is too long. Max message size is " + MAX_MSG_SIZE)
             return True
-        data = {'type': 'chat', 'message': para, 'user': self.user}
+        data = {'type': 'chat', 'message': send_msg, 'user': self.user,  'room': room}
         self.send_socket(json.dumps(data))
         self.print_prompt()
         return True
@@ -191,7 +206,7 @@ class Client:
                     self.print_prompt()
                     msg_dict = json.loads(data)
                     data_dict = msg_dict['data']
-                    if data_dict['type'] in ('chat', 'chatall'):
+                    if data_dict['type'] == 'chatall':
                         Client.write_stdout('\n[' + msg_dict['source'] + '] ' + data_dict['message'])
                     elif data_dict['type'] == 'register':
                         if data_dict['status'] == 'success':
@@ -213,6 +228,16 @@ class Client:
                     elif data_dict['type'] == 'query':
                         online_time = data_dict['online_time']
                         Client.write_stdout('Your total online time is ' + str(online_time) + 's\n')
+                    elif data_dict['type'] == 'create':
+                        print(str(data_dict))
+                    elif data_dict['type'] == 'enter':
+                        print(str(data_dict))
+                    elif data_dict['type'] == 'leave':
+                        print(str(data_dict))
+                    elif data_dict['type'] == 'chat':
+                        print(str(data_dict))
+                    elif data_dict['type'] == 'chatat':
+                        print(str(data_dict))
                     self.print_prompt()
                 except ValueError:
                     # non-structured msg
