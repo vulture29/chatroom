@@ -36,14 +36,23 @@ class Client:
         sys.stdout.write(message)
         sys.stdout.flush()
 
+    @staticmethod
+    def valid_account(username, passwd):
+        if username == "Guest":
+            return False
+        if len(username) < 1 or len(passwd) < 1:
+            return False
+        # can add more constraints
+        return True
+
     def register(self, para):
         # get username and password
         username = raw_input("Username: ")
         passwd = raw_input("Password: ")
-        # TODO: check format
+        if not Client.valid_account(username, passwd):
+            return True
         register_info = {'type': 'register', 'username': username, 'passwd': passwd}
         self.send_socket(json.dumps(register_info))
-        # self.print_prompt()
         return True
 
     def login(self, para):
@@ -97,7 +106,6 @@ class Client:
             return True
         data = {'type': 'chat', 'message': send_msg, 'user': self.user,  'room': room}
         self.send_socket(json.dumps(data))
-        self.print_prompt()
         return True
 
     def chatat(self, para):
@@ -117,7 +125,6 @@ class Client:
             send_msg = para[space_index + 1:]
         data = {'type': 'chatat', 'message': send_msg, 'user': self.user, 'target': target}
         self.send_socket(json.dumps(data))
-        self.print_prompt()
         return True
 
     def chatall(self, para):
@@ -132,16 +139,15 @@ class Client:
             return True
         data = {'type': 'chatall', 'message': para, 'user': self.user}
         self.send_socket(json.dumps(data))
-        self.print_prompt()
         return True
 
     def query(self, para):
         data = {'type': 'query', 'message': para, 'user': self.user}
         self.send_socket(json.dumps(data))
-        self.print_prompt()
         return True
 
     def print_prompt(self):
+        sys.stdin.flush()
         sys.stdout.write('[' + self.user + '] ')
         sys.stdout.flush()
 
@@ -190,12 +196,73 @@ class Client:
                         self.invalid_command_prompt()
                         continue
                     command_func(input_str[space_index + 1:] if space_index != -1 else '')
+                    self.print_prompt()
         except:
             print()
             print("Disconnected from server")
             sys.exit()
-
         return ret_data
+
+    def handle_register(self, data_dict, msg_dict):
+        if str(data_dict['status']) == 'success':
+            Client.write_stdout('Successfully registered!\n')
+        elif str(data_dict['status']) == 'exist':
+            Client.write_stdout('Your username has already been registered.\n' +
+                                'Try agin with another username.\n')
+        else:
+            Client.write_stdout('Fail to register.\n')
+
+    def handle_login(self, data_dict, msg_dict):
+        if str(data_dict['status']) == 'success':
+            self.user = str(data_dict['username'])
+            self.logged_in = True
+            Client.write_stdout('You have logged in as ' + self.user + '\n')
+        elif str(data_dict['status']) == 'already':
+            Client.write_stdout('The username has already logged in.\n')
+        elif str(data_dict['status']) == 'fail':
+            Client.write_stdout('Your username or password is invalid. Try again.\n')
+
+    def handle_query(self, data_dict, msg_dict):
+        online_time = data_dict['online_time']
+        Client.write_stdout('Your total online time is ' + str(online_time) + 's\n')
+
+    def handle_create(self, data_dict, msg_dict):
+        if str(data_dict['status']) == 'already':
+            Client.write_stdout('The chatroom is already existed.\n')
+        elif str(data_dict['status']) == 'success':
+            Client.write_stdout('Created chatroom successfully.\n')
+
+    def handle_enter(self, data_dict, msg_dict):
+        if str(data_dict['status']) == 'already':
+            Client.write_stdout('You are already in this chatroom.\n')
+        elif str(data_dict['status']) == 'not exist':
+            Client.write_stdout('The chatroom is not existed.\n')
+        elif str(data_dict['status']) == 'success':
+            Client.write_stdout('Enter chatroom successfully.\n')
+
+    def handle_leave(self, data_dict, msg_dict):
+        if str(data_dict['status']) == 'not inside':
+            Client.write_stdout('You are not inside this chatroom.\n')
+        elif 'success' in str(data_dict['status']):
+            Client.write_stdout('Left chatroom successfully.\n')
+
+    def handle_chat(self, data_dict, msg_dict):
+        if str(data_dict.get('status')) == 'no room' or str(data_dict.get('status')) == 'not in room':
+            Client.write_stdout('You are not inside this chatroom.\n')
+        else:
+            Client.write_stdout('\n[' + str(msg_dict['place'] + '][' +
+                                str(msg_dict['source'] + '] ' + str(data_dict['message']))))
+
+    def handle_chatat(self, data_dict, msg_dict):
+        if str(data_dict.get('status')) == 'no user':
+            Client.write_stdout('Your target user is not online or not existed.\n')
+        else:
+            Client.write_stdout('\n[' + str(msg_dict['place']) + '][' +
+                                str(msg_dict['source']) + '] ' + str(data_dict['message']))
+
+    def handle_chatall(self, data_dict, msg_dict):
+        Client.write_stdout('\n[' + str(msg_dict['place'] + '][' +
+                            str(msg_dict['source']) + '] ' + str(data_dict['message'])))
 
     def start_chat_client(self):
         self.print_prompt()
@@ -203,47 +270,17 @@ class Client:
             data_list = self.listen_socket()
             for data in data_list:
                 try:
-                    self.print_prompt()
                     msg_dict = json.loads(data)
                     data_dict = msg_dict['data']
-                    if data_dict['type'] == 'chatall':
-                        Client.write_stdout('\n[' + msg_dict['source'] + '] ' + data_dict['message'])
-                    elif data_dict['type'] == 'register':
-                        if data_dict['status'] == 'success':
-                            Client.write_stdout('Successfully registered!\n')
-                        elif data_dict['status'] == 'exist':
-                            Client.write_stdout('Your username has already been registered.\n' +
-                                                'Try agin with another username.\n')
-                        else:
-                            Client.write_stdout('Fail to register.\n')
-                    elif data_dict['type'] == 'login':
-                        if data_dict['status'] == 'success':
-                            self.user = data_dict['username']
-                            self.logged_in = True
-                            Client.write_stdout('You have logged in as ' + self.user + '\n')
-                        elif data_dict['status'] == 'already':
-                            Client.write_stdout('The username has already logged in.\n')
-                        elif data_dict['status'] == 'fail':
-                            Client.write_stdout('Your username or password is invalid. Try again.\n')
-                    elif data_dict['type'] == 'query':
-                        online_time = data_dict['online_time']
-                        Client.write_stdout('Your total online time is ' + str(online_time) + 's\n')
-                    elif data_dict['type'] == 'create':
-                        print(str(data_dict))
-                    elif data_dict['type'] == 'enter':
-                        print(str(data_dict))
-                    elif data_dict['type'] == 'leave':
-                        print(str(data_dict))
-                    elif data_dict['type'] == 'chat':
-                        print(str(data_dict))
-                    elif data_dict['type'] == 'chatat':
-                        print(str(data_dict))
+                    handle_command = data_dict.get('type')
+                    try:
+                        handle_command_func = getattr(self, 'handle_' + handle_command)
+                    except AttributeError:
+                        continue
+                    handle_command_func(data_dict, msg_dict)
                     self.print_prompt()
                 except ValueError:
-                    # non-structured msg
-                    print("non-structured msg")
-                    print(data)
-                    self.print_prompt()
+                    pass
 
         self.sock.close()
         sys.exit()

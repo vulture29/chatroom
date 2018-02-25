@@ -8,9 +8,9 @@ import time
 HOST = ''
 PORT = 9009
 MAX_LISTEN_NUM = 100
-USER_RECORD_FILE_PATH = '/Users/xingyao/Documents/Vulture/study/netease/chatroom/user_record'
-USER_ONLINE_RECORD_FILE_PATH = '/Users/xingyao/Documents/Vulture/study/netease/chatroom/user_online_record'
-CHAT_ROOM_RECORD_FILE_PATH = '/Users/xingyao/Documents/Vulture/study/netease/chatroom/chatroom_record'
+USER_RECORD_FILE_PATH = '/Users/xingyao/Documents/Vulture/study/netease/chatroom/server/user_record'
+USER_ONLINE_RECORD_FILE_PATH = '/Users/xingyao/Documents/Vulture/study/netease/chatroom/server/user_online_record'
+CHAT_ROOM_RECORD_FILE_PATH = '/Users/xingyao/Documents/Vulture/study/netease/chatroom/server/chatroom_record'
 
 
 class Connection:
@@ -92,7 +92,7 @@ class Server:
             total_online_time += offline_time
         for online_time in user_login_list:
             total_online_time -= online_time
-        return total_online_time
+        return int(total_online_time)
 
     def send_to_target(self, from_sock, target, message):
         target_found = False
@@ -102,20 +102,20 @@ class Server:
                 self.send_socket(connection.sock, message)
         if not target_found:
             room_info = {'type': 'chatat', 'status': "no user"}
-            message = {'source': str(self.get_user_from_sock(from_sock)), 'data': room_info}
-            self.send_socket(from_sock, json.dumps(message))
+            fail_message = {'source': str(self.get_user_from_sock(from_sock)), 'data': room_info}
+            self.send_socket(from_sock, json.dumps(fail_message))
 
     def broadcast_room(self, from_sock, room, message):
         connection_list = []
         if self.chatroom_dict.get(str(room)) is None:
             room_info = {'type': 'chat', 'status': "no room"}
-            message = {'source': str(self.get_user_from_sock(from_sock)), 'data': room_info}
-            self.send_socket(from_sock, json.dumps(message))
+            fail_message = {'source': str(self.get_user_from_sock(from_sock)), 'data': room_info}
+            self.send_socket(from_sock, json.dumps(fail_message))
             return
         if self.get_user_from_sock(from_sock) not in self.chatroom_dict.get(str(room)):
             room_info = {'type': 'chat', 'status': "not in room"}
-            message = {'source': str(self.get_user_from_sock(from_sock)), 'data': room_info}
-            self.send_socket(from_sock, json.dumps(message))
+            fail_message = {'source': str(self.get_user_from_sock(from_sock)), 'data': room_info}
+            self.send_socket(from_sock, json.dumps(fail_message))
             return
         for username in self.chatroom_dict.get(str(room)):
             connection_list.append(
@@ -129,7 +129,7 @@ class Server:
         for connection in connection_list:
             sock = connection.sock
             # send the message only to peer
-            if sock != self.server_socket and sock != from_sock:
+            if sock != self.server_socket and sock != from_sock and self.get_user_from_sock(sock) != 'Guest':
                 self.send_socket(sock, message)
 
     def handle_new_connection(self):
@@ -140,16 +140,25 @@ class Server:
         # self.broadcast(sock, "%s entered chatting room\n" % connection.user)
 
     def handle_disconnect(self, sock, data=None):
+        username = self.get_user_from_sock(sock)
+        for chatroom in self.chatroom_dict.keys():
+            if username in self.chatroom_dict.get(chatroom):
+                member_list = self.chatroom_dict.get(chatroom)
+                member_list.remove(username)
+                self.chatroom_dict[chatroom] = member_list
+
         for connection in self.connection_list:
             if connection.sock == sock:
                 username = connection.user
+                if self.user_online_dict.get(username) is None:
+                    self.remove_sock(sock)
+                    return
                 tmp_user_dict = self.user_online_dict[username]
                 tmp_user_dict['login_lock'] = False
                 tmp_user_dict['logout_time'].append(time.time())
                 self.user_online_dict[username] = tmp_user_dict
                 self.remove_sock(sock)
-                print("Client " + str(self.get_user_from_sock(sock)) + " disconnected")
-                self.broadcast(sock, "Client " + str(self.get_user_from_sock(sock)) + " disconnected\n")
+                print("Client " + username + " disconnected")
 
     def handle_register(self, sock, user_info):
         username = str(user_info['username'])
@@ -251,16 +260,16 @@ class Server:
 
     def handle_chat(self, sock, data):
         room = data['room']
-        message = {'source': data['user'], 'data': data}
+        message = {'place': 'Room: ' + room, 'source': data['user'], 'data': data}
         self.broadcast_room(sock, room,  "\r" + json.dumps(message))
 
     def handle_chatat(self, sock, data):
-        message = {'source': data['user'], 'data': data}
+        message = {'place': 'Private', 'source': data['user'], 'data': data}
         target = str(data['target'])
         self.send_to_target(sock, target, "\r" + json.dumps(message))
 
     def handle_chatall(self, sock, data):
-        message = {'source': data['user'], 'data': data}
+        message = {'place': 'Lobby', 'source': data['user'], 'data': data}
         self.broadcast(sock, "\r" + json.dumps(message))
 
     def handle_query(self, sock, data):
@@ -295,8 +304,7 @@ class Server:
                 # remove broken socket
                 self.handle_disconnect(sock)
 
-        except Exception as e:
-            print(e)
+        except:
             self.handle_disconnect(sock)
 
     def start_chat_server(self):
