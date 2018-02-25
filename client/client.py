@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import sys
 import socket
 import select
@@ -142,9 +144,15 @@ class Client:
         return True
 
     def query(self, para):
+        if not self.logged_in:
+            Client.write_stdout("You need to log in before chatting\n")
+            return True
         data = {'type': 'query', 'message': para, 'user': self.user}
         self.send_socket(json.dumps(data))
         return True
+
+    def exit(self):
+        sys.exit()
 
     def print_prompt(self):
         sys.stdin.flush()
