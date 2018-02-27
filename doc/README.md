@@ -31,7 +31,7 @@ python client/client_main.py
 - 保持一个连接list，当有新连接加入时把此socket加入该list
 - 使用poll监听此socket list，当有socket就绪时，取出socket的信息并进行相应操作。
 - 发送信息分三步，首先传递一个4字节的整数代表该消息的metadata长度，接着传递上一步所得长度的metadata，metadata包含了消息的真实长度，最后传输真实消息
-- 使用shelve object storage实现在线时长以及用户名存储
+- 使用json字符串实现在线时长以及用户名存储，并在每次写操作后将数据写入硬盘
 
 # 客户端基本设计思路
 - 保持一个连接list，此list只包含stdin和客户端本身的socket
