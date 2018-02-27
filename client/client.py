@@ -58,6 +58,9 @@ class Client:
         return True
 
     def login(self, para):
+        if self.logged_in:
+            Client.write_stdout("You have already logged in as " + self.user)
+            return True
         # get username and password
         username = raw_input("Username: ")
         passwd = raw_input("Password: ")

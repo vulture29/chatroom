@@ -4,7 +4,6 @@ import select
 import socket
 import json
 import struct
-import shelve
 import time
 
 HOST = ''
@@ -27,24 +26,39 @@ class Server:
         self.host = HOST
         self.port = PORT
         self.connection_list = []
-        self.user_online_dict = None
-        self.user_dict = None
-        self.chatroom_dict = None
-        self.server_socket = None
         self.init_db()
         self.init_server_socket()
 
     def init_db(self):
-        self.user_online_dict = shelve.open(USER_ONLINE_RECORD_FILE_PATH)
-        self.chatroom_dict = shelve.open(CHAT_ROOM_RECORD_FILE_PATH)
+        user_online_dict = Server.load_dict(USER_ONLINE_RECORD_FILE_PATH)
+        chatroom_dict = Server.load_dict(CHAT_ROOM_RECORD_FILE_PATH)
         # set all login lock to False
-        for user in self.user_online_dict.keys():
-            tmp_user_dict = self.user_online_dict.get(user)
+        for user in user_online_dict.keys():
+            tmp_user_dict = user_online_dict.get(user)
             tmp_user_dict['login_lock'] = False
-            self.user_online_dict[user] = tmp_user_dict
+            user_online_dict[user] = tmp_user_dict
+        Server.write_dict(USER_ONLINE_RECORD_FILE_PATH, user_online_dict)
         # set chatroom record to empty
-        self.chatroom_dict.clear()
-        self.user_dict = shelve.open(USER_RECORD_FILE_PATH)
+        Server.write_dict(CHAT_ROOM_RECORD_FILE_PATH, {})
+
+    @staticmethod
+    def load_dict(file_path):
+        try:
+            with open(file_path) as f:
+                load_dict = json.load(f)
+            return load_dict
+        except Exception as e:
+            print(file_path + ' load fail: ' + str(e))
+            return {}
+
+    @staticmethod
+    def write_dict(file_path, data_dict):
+        try:
+            with open(file_path, 'w') as f:
+                json.dump(data_dict, f)
+        except Exception as e:
+            print(file_path + ' write fail: ' + str(e))
+            return {}
 
     def init_server_socket(self):
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -85,7 +99,8 @@ class Server:
 
     def get_online_time(self, user):
         total_online_time = 0
-        user_dict = self.user_online_dict.get(user)
+        user_online_dict = Server.load_dict(USER_ONLINE_RECORD_FILE_PATH)
+        user_dict = user_online_dict.get(user)
         user_login_list = user_dict.get('login_time', [])
         user_logout_list = user_dict.get('logout_time', [])
         if user_dict.get('login_lock'):
@@ -109,17 +124,18 @@ class Server:
 
     def broadcast_room(self, from_sock, room, message):
         connection_list = []
-        if self.chatroom_dict.get(str(room)) is None:
+        chatroom_dict = Server.load_dict(CHAT_ROOM_RECORD_FILE_PATH)
+        if chatroom_dict.get(str(room)) is None:
             room_info = {'type': 'chat', 'status': "no room"}
             fail_message = {'source': str(self.get_user_from_sock(from_sock)), 'data': room_info}
             self.send_socket(from_sock, json.dumps(fail_message))
             return
-        if self.get_user_from_sock(from_sock) not in self.chatroom_dict.get(str(room)):
+        if self.get_user_from_sock(from_sock) not in chatroom_dict.get(str(room)):
             room_info = {'type': 'chat', 'status': "not in room"}
             fail_message = {'source': str(self.get_user_from_sock(from_sock)), 'data': room_info}
             self.send_socket(from_sock, json.dumps(fail_message))
             return
-        for username in self.chatroom_dict.get(str(room)):
+        for username in chatroom_dict.get(str(room)):
             connection_list.append(
                 [connection for connection in self.connection_list if connection.user == username][0])
         self.broadcast(from_sock, message, connection_list)
@@ -143,30 +159,36 @@ class Server:
 
     def handle_disconnect(self, sock, data=None):
         username = self.get_user_from_sock(sock)
-        for chatroom in self.chatroom_dict.keys():
-            if username in self.chatroom_dict.get(chatroom):
-                member_list = self.chatroom_dict.get(chatroom)
+        chatroom_dict = Server.load_dict(CHAT_ROOM_RECORD_FILE_PATH)
+        for chatroom in chatroom_dict.keys():
+            if username in chatroom_dict.get(chatroom):
+                member_list = chatroom_dict.get(chatroom)
                 member_list.remove(username)
-                self.chatroom_dict[chatroom] = member_list
+                chatroom_dict[chatroom] = member_list
+        Server.write_dict(CHAT_ROOM_RECORD_FILE_PATH, chatroom_dict)
 
         for connection in self.connection_list:
             if connection.sock == sock:
                 username = connection.user
-                if self.user_online_dict.get(username) is None:
+                user_online_dict = Server.load_dict(USER_ONLINE_RECORD_FILE_PATH)
+                if user_online_dict.get(username) is None:
                     self.remove_sock(sock)
                     return
-                tmp_user_dict = self.user_online_dict[username]
+                tmp_user_dict = user_online_dict[username]
                 tmp_user_dict['login_lock'] = False
                 tmp_user_dict['logout_time'].append(time.time())
-                self.user_online_dict[username] = tmp_user_dict
+                user_online_dict[username] = tmp_user_dict
+                Server.write_dict(USER_ONLINE_RECORD_FILE_PATH, user_online_dict)
                 self.remove_sock(sock)
                 print("Client " + username + " disconnected")
 
     def handle_register(self, sock, user_info):
         username = str(user_info['username'])
         passwd = str(user_info['passwd'])
-        if username not in self.user_dict:
-            self.user_dict[username] = passwd
+        user_dict = Server.load_dict(USER_RECORD_FILE_PATH)
+        if username not in user_dict:
+            user_dict[username] = passwd
+            Server.write_dict(USER_RECORD_FILE_PATH, user_dict)
             register_info = {'type': 'register', 'status': "success"}
             message = {'source': str(self.get_user_from_sock(sock)), 'data': register_info}
             self.send_socket(sock, json.dumps(message))
@@ -178,11 +200,15 @@ class Server:
     def handle_login(self, sock, user_info):
         username = str(user_info['username'])
         passwd = str(user_info['passwd'])
-        if username not in self.user_online_dict:
-            self.user_online_dict[username] = {'login_lock': False, 'login_time': [], 'logout_time': []}
-        if self.user_dict.get(username) != passwd:
+        user_online_dict = Server.load_dict(USER_ONLINE_RECORD_FILE_PATH)
+        if username not in user_online_dict:
+            user_online_dict[username] = {'login_lock': False, 'login_time': [], 'logout_time': []}
+            Server.write_dict(USER_ONLINE_RECORD_FILE_PATH, user_online_dict)
+        user_online_dict = Server.load_dict(USER_ONLINE_RECORD_FILE_PATH)
+        user_dict = Server.load_dict(USER_RECORD_FILE_PATH)
+        if user_dict.get(username) != passwd:
             status = 'fail'
-        elif self.user_online_dict.get(username).get('login_lock', False):
+        elif user_online_dict.get(username).get('login_lock', False):
             status = 'already'
         else:
             status = 'success'
@@ -195,19 +221,22 @@ class Server:
             for connection in self.connection_list:
                 if connection.sock == sock:
                     connection.user = username
-            tmp_user_dict = self.user_online_dict[username]
+            tmp_user_dict = user_online_dict[username]
             tmp_user_dict['login_lock'] = True
             tmp_user_dict['login_time'].append(time.time())
-            self.user_online_dict[username] = tmp_user_dict
+            user_online_dict[username] = tmp_user_dict
+            Server.write_dict(USER_ONLINE_RECORD_FILE_PATH, user_online_dict)
             self.broadcast(sock, "%s entered chatting room\n" % username)
 
     def handle_create(self, sock, data):
         room_name = str(data['room'])
         username = str(data['user'])
-        if room_name in self.chatroom_dict:
+        chatroom_dict = Server.load_dict(CHAT_ROOM_RECORD_FILE_PATH)
+        if room_name in chatroom_dict:
             status = 'already'
         else:
-            self.chatroom_dict[room_name] = []
+            chatroom_dict[room_name] = []
+            Server.write_dict(CHAT_ROOM_RECORD_FILE_PATH, chatroom_dict)
             status = 'success'
         create_info = {'type': 'create', 'status': status}
         message = {'source': username, 'data': create_info}
@@ -216,15 +245,17 @@ class Server:
     def handle_enter(self, sock, data):
         room_name = str(data['room'])
         username = str(data['user'])
-        if room_name not in self.chatroom_dict:
+        chatroom_dict = Server.load_dict(CHAT_ROOM_RECORD_FILE_PATH)
+        if room_name not in chatroom_dict:
             status = 'not exist'
         else:
-            member_list = self.chatroom_dict.get(room_name)
+            member_list = chatroom_dict.get(room_name)
             if username in member_list:
                 status = 'already'
             else:
                 member_list.append(username)
-                self.chatroom_dict[room_name] = member_list
+                chatroom_dict[room_name] = member_list
+                Server.write_dict(CHAT_ROOM_RECORD_FILE_PATH, chatroom_dict)
                 status = 'success'
         enter_info = {'type': 'enter', 'status': status}
         message = {'source': username, 'data': enter_info}
@@ -234,28 +265,31 @@ class Server:
         username = str(data['user'])
         room_name = str(data['room'])
         found_flag = False
-        for chatroom in self.chatroom_dict.keys():
-            if username in self.chatroom_dict.get(chatroom):
+        chatroom_dict = Server.load_dict(CHAT_ROOM_RECORD_FILE_PATH)
+        for chatroom in chatroom_dict.keys():
+            if username in chatroom_dict.get(chatroom):
                 found_flag = True
                 break
         if not found_flag:
             status = 'not inside'
         else:
             if len(room_name) > 0:
-                member_list = self.chatroom_dict.get(room_name)
+                member_list = chatroom_dict.get(room_name)
                 if username in member_list:
                     member_list.remove(username)
-                    self.chatroom_dict[room_name] = member_list
+                    chatroom_dict[room_name] = member_list
+                    Server.write_dict(CHAT_ROOM_RECORD_FILE_PATH, chatroom_dict)
                     status = 'success1'
                 else:
                     status = 'not inside'
             else:
-                for chatroom in self.chatroom_dict.keys():
-                    if username in self.chatroom_dict.get(chatroom):
-                        member_list = self.chatroom_dict.get(chatroom)
+                for chatroom in chatroom_dict.keys():
+                    if username in chatroom_dict.get(chatroom):
+                        member_list = chatroom_dict.get(chatroom)
                         member_list.remove(username)
-                        self.chatroom_dict[room_name] = member_list
+                        chatroom_dict[room_name] = member_list
                         status = 'success2'
+                Server.write_dict(CHAT_ROOM_RECORD_FILE_PATH, chatroom_dict)
         leave_info = {'type': 'leave', 'status': status}
         message = {'source': username, 'data': leave_info}
         self.send_socket(sock, json.dumps(message))
